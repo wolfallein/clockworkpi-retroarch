@@ -1,0 +1,792 @@
+diff --git a/Makefile.common b/Makefile.common
+index 3d4a75b..ced3bbf 100644
+--- a/Makefile.common
++++ b/Makefile.common
+@@ -2,6 +2,10 @@ ROOT_DIR          := .
+ DEPS_DIR          := $(ROOT_DIR)/deps
+ LIBRETRO_COMM_DIR := $(ROOT_DIR)/libretro-common
+ WANT_WGL           = 0
++HAVE_LAKKA	= 1
++#HAVE_LAKKA_SWITCH	= 1
++HAVE_LAKKA_CPI	= 1
++HAVE_BLUETOOTH	= 1
+ 
+ ifeq ($(HAVE_STACK_USAGE), 1)
+    DEF_FLAGS += -fstack-usage
+@@ -831,6 +835,10 @@ ifeq ($(HAVE_LAKKA_SWITCH), 1)
+    DEFINES += -DHAVE_LAKKA_SWITCH
+ endif
+ 
++ifeq ($(HAVE_LAKKA_CPI), 1)
++   DEFINES += -DHAVE_LAKKA_CPI
++endif
++
+ ifeq ($(HAVE_MENU_COMMON), 1)
+    OBJ += menu/menu_setting.o \
+           menu/cbs/menu_cbs_ok.o \
+diff --git a/bluetooth/drivers/bluetoothctl.c b/bluetooth/drivers/bluetoothctl.c
+index 414d902..19b483e 100644
+--- a/bluetooth/drivers/bluetoothctl.c
++++ b/bluetooth/drivers/bluetoothctl.c
+@@ -57,6 +57,9 @@ static void bluetoothctl_scan(void)
+       free(lines);
+    lines = string_list_new();
+ 
++   // Make sure connmanctl is not blocking it
++   pclose(popen("connmanctl enable bluetooth", "r"));
++
+    pclose(popen("bluetoothctl -- power on", "r"));
+ 
+    pclose(popen("bluetoothctl --timeout 15 scan on", "r"));
+diff --git a/command.h b/command.h
+index c9ff24e..0945983 100644
+--- a/command.h
++++ b/command.h
+@@ -123,6 +123,8 @@ enum event_command
+    /* Restarts RetroArch. */
+    CMD_EVENT_RESTART_RETROARCH,
+    /* Shutdown the OS */
++   CMD_EVENT_STORAGE_RELOAD,
++   CMD_EVENT_PULSEAUDIO_RELOAD,
+    CMD_EVENT_SHUTDOWN,
+    /* Reboot the OS */
+    CMD_EVENT_REBOOT,
+diff --git a/config.def.h b/config.def.h
+index 21314eb..5dd761d 100644
+--- a/config.def.h
++++ b/config.def.h
+@@ -817,6 +817,9 @@ static const bool audio_enable_menu_bgm    = false;
+ /* Enables displaying the current frames per second. */
+ #define DEFAULT_FPS_SHOW false
+ 
++#define DEFAULT_TEMP_SHOW true
++#define DEFAULT_CPU_SHOW true
++
+ /* FPS display will be updated at the set interval (in frames) */
+ #define DEFAULT_FPS_UPDATE_INTERVAL 256
+ 
+diff --git a/configuration.c b/configuration.c
+index 062085d..c3e1f64 100644
+--- a/configuration.c
++++ b/configuration.c
+@@ -1425,6 +1425,8 @@ static struct config_bool_setting *populate_settings_bool(
+    SETTING_BOOL("builtin_mediaplayer_enable",    &settings->bools.multimedia_builtin_mediaplayer_enable, false, false /* TODO */, false);
+    SETTING_BOOL("builtin_imageviewer_enable",    &settings->bools.multimedia_builtin_imageviewer_enable, true, true, false);
+    SETTING_BOOL("fps_show",                      &settings->bools.video_fps_show, true, DEFAULT_FPS_SHOW, false);
++   SETTING_BOOL("temp_show",                     &settings->bools.video_temp_show, true, DEFAULT_TEMP_SHOW, false);
++   SETTING_BOOL("cpufreq_show",                  &settings->bools.video_cpufreq_show, true, DEFAULT_CPU_SHOW, false);
+    SETTING_BOOL("statistics_show",               &settings->bools.video_statistics_show, true, DEFAULT_STATISTICS_SHOW, false);
+    SETTING_BOOL("framecount_show",               &settings->bools.video_framecount_show, true, DEFAULT_FRAMECOUNT_SHOW, false);
+    SETTING_BOOL("memory_show",                   &settings->bools.video_memory_show, true, DEFAULT_MEMORY_SHOW, false);
+diff --git a/configuration.h b/configuration.h
+index 3d21ae7..d688174 100644
+--- a/configuration.h
++++ b/configuration.h
+@@ -108,6 +108,8 @@ typedef struct settings
+       bool video_shared_context;
+       bool video_force_srgb_disable;
+       bool video_fps_show;
++      bool video_temp_show;
++      bool video_cpufreq_show;
+       bool video_statistics_show;
+       bool video_framecount_show;
+       bool video_memory_show;
+diff --git a/gfx/gfx_widgets.c b/gfx/gfx_widgets.c
+index c0a6128..ec3563a 100644
+--- a/gfx/gfx_widgets.c
++++ b/gfx/gfx_widgets.c
+@@ -1540,7 +1540,8 @@ void gfx_widgets_frame(void *data)
+       gfx_display_draw_quad(userdata,
+             video_width,
+             video_height,
+-            top_right_x_advance - total_width, 0,
++//            top_right_x_advance - total_width, 0,
++            0, 0,
+             total_width,
+             p_dispwidget->simple_widget_height,
+             video_width,
+@@ -1555,7 +1556,8 @@ void gfx_widgets_frame(void *data)
+             + p_dispwidget->gfx_widget_fonts.regular.line_centre_offset,
+             video_width, video_height,
+             0xFFFFFFFF,
+-            TEXT_ALIGN_LEFT,
++            TEXT_ALIGN_RIGHT,
++//            TEXT_ALIGN_LEFT,
+             true);
+    }
+ 
+diff --git a/intl/msg_hash_lbl.h b/intl/msg_hash_lbl.h
+index fcd0a01..56d2ea4 100644
+--- a/intl/msg_hash_lbl.h
++++ b/intl/msg_hash_lbl.h
+@@ -8,6 +8,10 @@ MSG_HASH(
+    "switch_backlight_control"
+    )
+ #endif
++#ifdef HAVE_LAKKA_CPI
++MSG_HASH(MENU_ENUM_LABEL_SWITCH_BACKLIGHT_CONTROL,
++      "switch_backlight_control")
++#endif
+ #if defined(HAVE_LAKKA_SWITCH) || defined(HAVE_LIBNX)
+ MSG_HASH(
+    MENU_ENUM_LABEL_SWITCH_CPU_PROFILE,
+@@ -2580,6 +2584,14 @@ MSG_HASH(
+    MENU_ENUM_LABEL_SHUTDOWN,
+    "shutdown"
+    )
++MSG_HASH(
++   MENU_ENUM_LABEL_STORAGE_RELOAD,
++   "storage reload"
++   )
++MSG_HASH(
++   MENU_ENUM_LABEL_PULSEAUDIO_RELOAD,
++   "pulseaudio reload"
++   )
+ MSG_HASH(
+    MENU_ENUM_LABEL_SLOWMOTION_RATIO,
+    "slowmotion_ratio"
+diff --git a/intl/msg_hash_us.h b/intl/msg_hash_us.h
+index 0fe0e0f..4f6f8c8 100644
+--- a/intl/msg_hash_us.h
++++ b/intl/msg_hash_us.h
+@@ -10606,6 +10606,14 @@ MSG_HASH(
+    MSG_VALUE_REBOOTING,
+    "Rebooting..."
+    )
++MSG_HASH(
++   MSG_VALUE_STORAGE_RELOADING,
++   "Reloading storage..."
++   )
++MSG_HASH(
++   MSG_VALUE_PULSEAUDIO_RELOADING,
++   "Reloading pulseaudio..."
++   )
+ MSG_HASH(
+    MSG_VALUE_SHUTTING_DOWN,
+    "Shutting down..."
+@@ -11040,6 +11048,14 @@ MSG_HASH(
+    MENU_ENUM_LABEL_VALUE_SHUTDOWN,
+    "Shutdown"
+    )
++MSG_HASH(
++   MENU_ENUM_LABEL_VALUE_STORAGE_RELOAD,
++   "Storage reload"
++   )
++MSG_HASH(
++   MENU_ENUM_LABEL_VALUE_PULSEAUDIO_RELOAD,
++   "Pulseaudio reload"
++   )
+ MSG_HASH(
+    MENU_ENUM_LABEL_VALUE_FILE_BROWSER_OPEN_UWP_PERMISSIONS,
+    "Enable external file access"
+@@ -11222,6 +11238,16 @@ MSG_HASH(
+    "Reboot into RCM"
+    )
+ #endif
++#ifdef HAVE_LAKKA_CPI
++MSG_HASH(
++    MENU_ENUM_LABEL_VALUE_SWITCH_BACKLIGHT_CONTROL,
++    "Screen brightness"
++    )
++MSG_HASH(
++    MENU_ENUM_SUBLABEL_SWITCH_BACKLIGHT_CONTROL,
++    "Increase or decrease the screen brightness"
++    )
++#endif
+ #if defined(HAVE_LAKKA_SWITCH) || defined(HAVE_LIBNX)
+ MSG_HASH(
+    MENU_ENUM_LABEL_VALUE_SWITCH_CPU_PROFILE,
+diff --git a/lakka.h b/lakka.h
+index f098a10..de56433 100644
+--- a/lakka.h
++++ b/lakka.h
+@@ -22,7 +22,8 @@
+ #define LAKKA_SAMBA_PATH     "/storage/.cache/services/samba.conf"
+ #define LAKKA_BLUETOOTH_PATH "/storage/.cache/services/bluez.conf"
+ #define LAKKA_UPDATE_DIR     "/storage/.update/"
+-#define LAKKA_CONNMAN_DIR    "/storage/.cache/connman/"
++#define LAKKA_CONNMAN_DIR    "/var/lib/connman/"
++//#define LAKKA_CONNMAN_DIR    "/storage/.cache/connman/"
+ #define LAKKA_LOCALAP_PATH   "/storage/.cache/services/localap.conf"
+ 
+ #include "switch_performance_profiles.h"
+diff --git a/menu/cbs/menu_cbs_deferred_push.c b/menu/cbs/menu_cbs_deferred_push.c
+index 190df8f..1df9af7 100644
+--- a/menu/cbs/menu_cbs_deferred_push.c
++++ b/menu/cbs/menu_cbs_deferred_push.c
+@@ -254,6 +254,10 @@ GENERIC_DEFERRED_PUSH(deferred_push_switch_gpu_profile,             DISPLAYLIST_
+ GENERIC_DEFERRED_PUSH(deferred_push_switch_backlight_control,       DISPLAYLIST_SWITCH_BACKLIGHT_CONTROL)
+ #endif
+ 
++#ifdef HAVE_LAKKA_CPI
++GENERIC_DEFERRED_PUSH(deferred_push_switch_backlight_control,       DISPLAYLIST_SWITCH_BACKLIGHT_CONTROL)
++#endif
++
+ GENERIC_DEFERRED_PUSH(deferred_push_manual_content_scan_list,       DISPLAYLIST_MANUAL_CONTENT_SCAN_LIST)
+ GENERIC_DEFERRED_PUSH(deferred_push_manual_content_scan_dat_file,   DISPLAYLIST_MANUAL_CONTENT_SCAN_DAT_FILES)
+ 
+@@ -789,6 +793,9 @@ static int menu_cbs_init_bind_deferred_push_compare_label(
+       {MENU_ENUM_LABEL_SWITCH_GPU_PROFILE, deferred_push_switch_gpu_profile},
+       {MENU_ENUM_LABEL_SWITCH_BACKLIGHT_CONTROL, deferred_push_switch_backlight_control},
+ #endif
++#ifdef HAVE_LAKKA_CPI
++      {MENU_ENUM_LABEL_SWITCH_BACKLIGHT_CONTROL, deferred_push_switch_backlight_control},
++#endif
+ #if defined(HAVE_LAKKA_SWITCH) || defined(HAVE_LIBNX)
+       {MENU_ENUM_LABEL_SWITCH_CPU_PROFILE, deferred_push_switch_cpu_profile},
+ #endif
+diff --git a/menu/cbs/menu_cbs_ok.c b/menu/cbs/menu_cbs_ok.c
+index 81d7278..33678c2 100644
+--- a/menu/cbs/menu_cbs_ok.c
++++ b/menu/cbs/menu_cbs_ok.c
+@@ -3295,20 +3295,33 @@ static int action_ok_set_switch_gpu_profile(const char *path,
+    return menu_cbs_exit();
+ }
+ 
++#endif
++
++#ifdef HAVE_LAKKA_CPI
++
+ static int action_ok_set_switch_backlight(const char *path,
+       const char *label, unsigned type, size_t idx, size_t entry_idx)
+ {
++static int SWITCH_BRIGHTNESS[] = {
++    0,
++    1,
++    2,
++    3,
++    4,
++    5,
++    6,
++    7,
++    8,
++    9};
++
+    char command[PATH_MAX_LENGTH] = {0};
+    int brightness = SWITCH_BRIGHTNESS[entry_idx];
+ 
+-   snprintf(command, sizeof(command),
+-         "echo %d > /sys/class/backlight/backlight/brightness",
+-         brightness);
++   snprintf(command, sizeof(command), "echo %d | sudo tee -a /sys/class/backlight/backlight/brightness", brightness);
+ 
+    system(command);
+ 
+-   snprintf(command, sizeof(command),
+-         "Brightness set to %d%%", brightness);
++   snprintf(command, sizeof(command), "Brightness set to %d", brightness);
+ 
+    runloop_msg_queue_push(command, 1, 90, true, NULL,
+          MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
+@@ -6756,6 +6769,9 @@ static int menu_cbs_init_bind_ok_compare_label(menu_file_list_cbs_t *cbs,
+          {MENU_ENUM_LABEL_SWITCH_GPU_PROFILE,                  action_ok_push_default},
+          {MENU_ENUM_LABEL_SWITCH_BACKLIGHT_CONTROL,            action_ok_push_default},
+ #endif
++#ifdef HAVE_LAKKA_CPI
++         {MENU_ENUM_LABEL_SWITCH_BACKLIGHT_CONTROL,            action_ok_push_default},
++#endif
+ #if defined(HAVE_LAKKA_SWITCH) || defined(HAVE_LIBNX)
+          {MENU_ENUM_LABEL_SWITCH_CPU_PROFILE,                  action_ok_push_default},
+ #endif
+@@ -7183,6 +7199,11 @@ static int menu_cbs_init_bind_ok_compare_type(menu_file_list_cbs_t *cbs,
+             BIND_ACTION_OK(cbs, action_ok_set_switch_backlight);
+             break;
+ #endif
++#ifdef HAVE_LAKKA_CPI
++         case MENU_SET_SWITCH_BRIGHTNESS:
++            BIND_ACTION_OK(cbs, action_ok_set_switch_backlight);
++            break;
++#endif
+ #if defined(HAVE_LAKKA_SWITCH) || defined(HAVE_LIBNX)
+          case MENU_SET_SWITCH_CPU_PROFILE:
+             BIND_ACTION_OK(cbs, action_ok_set_switch_cpu_profile);
+diff --git a/menu/cbs/menu_cbs_sublabel.c b/menu/cbs/menu_cbs_sublabel.c
+index ad7d179..8dab8b2 100644
+--- a/menu/cbs/menu_cbs_sublabel.c
++++ b/menu/cbs/menu_cbs_sublabel.c
+@@ -783,6 +783,10 @@ DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_switch_gpu_profile,             MENU
+ DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_switch_backlight_control,       MENU_ENUM_SUBLABEL_SWITCH_BACKLIGHT_CONTROL)
+ #endif
+ 
++#ifdef HAVE_LAKKA_CPI
++DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_switch_backlight_control,       MENU_ENUM_SUBLABEL_SWITCH_BACKLIGHT_CONTROL)
++#endif
++
+ #if defined(_3DS)
+ DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_video_3ds_lcd_bottom,           MENU_ENUM_SUBLABEL_VIDEO_3DS_LCD_BOTTOM)
+ DEFAULT_SUBLABEL_MACRO(action_bind_sublabel_video_3ds_display_mode,         MENU_ENUM_SUBLABEL_VIDEO_3DS_DISPLAY_MODE)
+@@ -3545,6 +3549,11 @@ int menu_cbs_init_bind_sublabel(menu_file_list_cbs_t *cbs,
+             BIND_ACTION_SUBLABEL(cbs, action_bind_sublabel_switch_backlight_control);
+             break;
+ #endif
++#ifdef HAVE_LAKKA_CPI
++         case MENU_ENUM_LABEL_SWITCH_BACKLIGHT_CONTROL:
++            BIND_ACTION_SUBLABEL(cbs, action_bind_sublabel_switch_backlight_control);
++            break;
++#endif
+ #if defined(_3DS)
+          case MENU_ENUM_LABEL_VIDEO_3DS_LCD_BOTTOM:
+             BIND_ACTION_SUBLABEL(cbs, action_bind_sublabel_video_3ds_lcd_bottom);
+diff --git a/menu/cbs/menu_cbs_title.c b/menu/cbs/menu_cbs_title.c
+index 122d4f6..6eb1b22 100644
+--- a/menu/cbs/menu_cbs_title.c
++++ b/menu/cbs/menu_cbs_title.c
+@@ -600,6 +600,11 @@ DEFAULT_TITLE_MACRO(action_get_title_switch_gpu_profile,          MENU_ENUM_LABE
+ DEFAULT_TITLE_MACRO(action_get_title_switch_backlight_control,    MENU_ENUM_LABEL_VALUE_SWITCH_BACKLIGHT_CONTROL)
+ #endif
+ 
++#ifdef HAVE_LAKKA_CPI
++DEFAULT_TITLE_MACRO(action_get_title_switch_backlight_control,    MENU_ENUM_LABEL_VALUE_SWITCH_BACKLIGHT_CONTROL)
++#endif
++
++
+ static int action_get_title_generic(char *s, size_t len, const char *path,
+       const char *text)
+ {
+@@ -1025,6 +1030,10 @@ static int menu_cbs_init_bind_title_compare_label(menu_file_list_cbs_t *cbs,
+          action_get_title_switch_gpu_profile},
+       {MENU_ENUM_LABEL_SWITCH_BACKLIGHT_CONTROL,
+          action_get_title_switch_backlight_control},
++#endif
++#ifdef HAVE_LAKKA_CPI
++      {MENU_ENUM_LABEL_SWITCH_BACKLIGHT_CONTROL,
++         action_get_title_switch_backlight_control},
+ #endif
+       {MENU_ENUM_LABEL_DEFERRED_MANUAL_CONTENT_SCAN_LIST,
+          action_get_title_manual_content_scan_list},
+@@ -1414,6 +1423,11 @@ static int menu_cbs_init_bind_title_compare_label(menu_file_list_cbs_t *cbs,
+          case MENU_ENUM_LABEL_SWITCH_BACKLIGHT_CONTROL:
+             BIND_ACTION_GET_TITLE(cbs, action_get_title_switch_backlight_control);
+             break;
++#endif
++#ifdef HAVE_LAKKA_CPI
++         case MENU_ENUM_LABEL_SWITCH_BACKLIGHT_CONTROL:
++            BIND_ACTION_GET_TITLE(cbs, action_get_title_switch_backlight_control);
++	    break;
+ #endif
+          case MENU_ENUM_LABEL_MANUAL_CONTENT_SCAN_LIST:
+             BIND_ACTION_GET_TITLE(cbs, action_get_title_manual_content_scan_list);
+diff --git a/menu/menu_displaylist.c b/menu/menu_displaylist.c
+index 8da2871..a4699ce 100644
+--- a/menu/menu_displaylist.c
++++ b/menu/menu_displaylist.c
+@@ -5130,9 +5130,9 @@ unsigned menu_displaylist_build_list(
+                struct string_list *device_list = string_list_new();
+                driver_bluetooth_get_devices(device_list);
+ 
+-               if (device_list->size == 0)
++               //if (device_list->size == 0)
+                   task_push_bluetooth_scan(bluetooth_scan_callback);
+-               else
++               /*else
+                {
+                   unsigned i;
+                   for (i = 0; i < device_list->size; i++)
+@@ -5145,7 +5145,7 @@ unsigned menu_displaylist_build_list(
+                               MENU_BLUETOOTH, 0, 0))
+                         count++;
+                   }
+-               }
++               }*/
+             }
+          }
+ #endif
+@@ -5159,22 +5159,22 @@ unsigned menu_displaylist_build_list(
+                struct string_list *ssid_list = string_list_new();
+                driver_wifi_get_ssids(ssid_list);
+ 
+-               if (ssid_list->size == 0)
++               //if (ssid_list->size == 0)
+                   task_push_wifi_scan(wifi_scan_callback);
+-               else
+-               {
+-                  unsigned i;
+-                  for (i = 0; i < ssid_list->size; i++)
+-                  {
+-                     const char *ssid = ssid_list->elems[i].data;
+-                     if (menu_entries_append_enum(list,
+-                              ssid,
+-                              msg_hash_to_str(MENU_ENUM_LABEL_CONNECT_WIFI),
+-                              MENU_ENUM_LABEL_CONNECT_WIFI,
+-                              MENU_WIFI, 0, 0))
+-                        count++;
+-                  }
+-               }
++               //else
++               //{
++               //   unsigned i;
++               //   for (i = 0; i < ssid_list->size; i++)
++               //   {
++               //      const char *ssid = ssid_list->elems[i].data;
++               //      if (menu_entries_append_enum(list,
++               //               ssid,
++               //               msg_hash_to_str(MENU_ENUM_LABEL_CONNECT_WIFI),
++               //               MENU_ENUM_LABEL_CONNECT_WIFI,
++               //               MENU_WIFI, 0, 0))
++               //         count++;
++               //   }
++               //}
+             }
+          }
+ #endif
+@@ -9040,11 +9040,11 @@ bool menu_displaylist_ctl(enum menu_displaylist_ctl_state type,
+ 
+          menu_entries_ctl(MENU_ENTRIES_CTL_CLEAR, info->list);
+ 
+-         for (i = 0; i < brightness_count; i++)
++         for (i = 1; i < brightness_count; i++)
+          {
+             char title[PATH_MAX_LENGTH] = {0};
+ 
+-            snprintf(title, sizeof(title), "Set to %d%%", SWITCH_BRIGHTNESS[i]);
++            snprintf(title, sizeof(title), "Set to %d", SWITCH_BRIGHTNESS[i]);
+ 
+             if (menu_entries_append_enum(info->list, title, "", 0, MENU_SET_SWITCH_BRIGHTNESS, 0, i))
+                count++;
+@@ -9058,6 +9058,43 @@ bool menu_displaylist_ctl(enum menu_displaylist_ctl_state type,
+       }
+ #endif /* HAVE_LAKKA_SWITCH */
+ #endif /* HAVE_LAKKA_SWITCH || HAVE_LIBNX */
++#ifdef HAVE_LAKKA_CPI
++      case DISPLAYLIST_SWITCH_BACKLIGHT_CONTROL:
++      {
++	static int SWITCH_BRIGHTNESS[] = {
++		0,
++		1,
++		2,
++		3,
++		4,
++		5,
++		6,
++		7,
++		8,
++		9};
++
++         unsigned i;
++         const size_t brightness_count = sizeof(SWITCH_BRIGHTNESS)/sizeof(SWITCH_BRIGHTNESS[1]);
++
++         menu_entries_ctl(MENU_ENTRIES_CTL_CLEAR, info->list);
++
++         for (i = 1; i < brightness_count; i++)
++         {
++            char title[PATH_MAX_LENGTH] = {0};
++
++            snprintf(title, sizeof(title), "Set to %d", SWITCH_BRIGHTNESS[i]);
++
++            if (menu_entries_append_enum(info->list, title, "", 0, MENU_SET_SWITCH_BRIGHTNESS, 0, i))
++               count++;
++         }
++
++         info->need_push    = true;
++         info->need_refresh = true;
++         info->need_clear   = true;
++
++         break;
++      }
++#endif
+       case DISPLAYLIST_MUSIC_LIST:
+          {
+             menu_entries_ctl(MENU_ENTRIES_CTL_CLEAR, info->list);
+@@ -10908,11 +10945,22 @@ bool menu_displaylist_ctl(enum menu_displaylist_ctl_state type,
+                PARSE_ACTION, false) == 0)
+                count++;
+ 
++            if (MENU_DISPLAYLIST_PARSE_SETTINGS_ENUM(info->list,
++               MENU_ENUM_LABEL_STORAGE_RELOAD,
++               PARSE_ACTION, false) == 0)
++               count++;
++
++            if (MENU_DISPLAYLIST_PARSE_SETTINGS_ENUM(info->list,
++               MENU_ENUM_LABEL_PULSEAUDIO_RELOAD,
++               PARSE_ACTION, false) == 0)
++               count++;
++
+             if (settings->bools.menu_show_reboot)
+                if (MENU_DISPLAYLIST_PARSE_SETTINGS_ENUM(info->list,
+                      MENU_ENUM_LABEL_REBOOT,
+                      PARSE_ACTION, false) == 0)
+                   count++;
++
+             if (settings->bools.menu_show_shutdown)
+                if (MENU_DISPLAYLIST_PARSE_SETTINGS_ENUM(info->list,
+                      MENU_ENUM_LABEL_SHUTDOWN,
+diff --git a/menu/menu_displaylist.h b/menu/menu_displaylist.h
+index 5fd00c2..bdb43ed 100644
+--- a/menu/menu_displaylist.h
++++ b/menu/menu_displaylist.h
+@@ -232,6 +232,9 @@ enum menu_displaylist_ctl_state
+    DISPLAYLIST_SWITCH_GPU_PROFILE,
+    DISPLAYLIST_SWITCH_BACKLIGHT_CONTROL,
+ #endif
++#ifdef HAVE_LAKKA_CPI
++   DISPLAYLIST_SWITCH_BACKLIGHT_CONTROL,
++#endif
+ #if defined(HAVE_LAKKA_SWITCH) || defined(HAVE_LIBNX)
+    DISPLAYLIST_SWITCH_CPU_PROFILE,
+ #endif
+diff --git a/menu/menu_driver.h b/menu/menu_driver.h
+index eecda68..57c0495 100644
+--- a/menu/menu_driver.h
++++ b/menu/menu_driver.h
+@@ -193,6 +193,9 @@ enum menu_settings_type
+    MENU_SET_SWITCH_GPU_PROFILE,
+    MENU_SET_SWITCH_BRIGHTNESS,
+ #endif
++#ifdef HAVE_LAKKA_CPI
++   MENU_SET_SWITCH_BRIGHTNESS,
++#endif
+ #if defined(HAVE_LAKKA_SWITCH) || defined(HAVE_LIBNX)
+    MENU_SET_SWITCH_CPU_PROFILE,
+ #endif
+diff --git a/menu/menu_setting.c b/menu/menu_setting.c
+index 217b73a..0bdb316 100644
+--- a/menu/menu_setting.c
++++ b/menu/menu_setting.c
+@@ -8047,6 +8047,34 @@ static bool setting_append_list(
+                &subgroup_info,
+                parent_group);
+ #else
++#ifdef HAVE_LAKKA_CPI
++        CONFIG_ACTION(
++               list, list_info,
++               MENU_ENUM_LABEL_SWITCH_BACKLIGHT_CONTROL,
++               MENU_ENUM_LABEL_VALUE_SWITCH_BACKLIGHT_CONTROL,
++               &group_info,
++               &subgroup_info,
++               parent_group);
++
++        CONFIG_ACTION(
++               list, list_info,
++               MENU_ENUM_LABEL_STORAGE_RELOAD,
++               MENU_ENUM_LABEL_VALUE_STORAGE_RELOAD,
++               &group_info,
++               &subgroup_info,
++               parent_group);
++         MENU_SETTINGS_LIST_CURRENT_ADD_CMD(list, list_info, CMD_EVENT_STORAGE_RELOAD);
++
++        CONFIG_ACTION(
++               list, list_info,
++               MENU_ENUM_LABEL_PULSEAUDIO_RELOAD,
++               MENU_ENUM_LABEL_VALUE_PULSEAUDIO_RELOAD,
++               &group_info,
++               &subgroup_info,
++               parent_group);
++         MENU_SETTINGS_LIST_CURRENT_ADD_CMD(list, list_info, CMD_EVENT_PULSEAUDIO_RELOAD);
++#endif
++
+          CONFIG_ACTION(
+                list, list_info,
+                MENU_ENUM_LABEL_REBOOT,
+diff --git a/msg_hash.h b/msg_hash.h
+index 8acf791..5eea579 100644
+--- a/msg_hash.h
++++ b/msg_hash.h
+@@ -241,6 +241,8 @@ enum msg_hash_enums
+    MSG_FAILED_TO_EXTRACT_CONTENT_FROM_COMPRESSED_FILE,
+    MSG_FILE_NOT_FOUND,
+    MSG_VALUE_SHUTTING_DOWN,
++   MSG_VALUE_STORAGE_RELOADING,
++   MSG_VALUE_PULSEAUDIO_RELOADING,
+    MSG_VALUE_REBOOTING,
+    MSG_FAILED_TO_START_AUDIO_DRIVER,
+    MSG_FOUND_LAST_STATE_SLOT,
+@@ -1973,6 +1975,8 @@ enum msg_hash_enums
+    MENU_LABEL(QUIT_RETROARCH),
+    MENU_LABEL(RESTART_RETROARCH),
+    MENU_LABEL(SHUTDOWN),
++   MENU_LABEL(STORAGE_RELOAD),
++   MENU_LABEL(PULSEAUDIO_RELOAD),
+    MENU_LABEL(REBOOT),
+    MENU_LABEL(DISK_IMAGE_APPEND),
+ 
+diff --git a/retroarch.c b/retroarch.c
+index 6eb42d5..23b536d 100644
+--- a/retroarch.c
++++ b/retroarch.c
+@@ -15678,6 +15678,8 @@ bool command_event(enum event_command cmd, void *data)
+          break;
+       case CMD_EVENT_FPS_TOGGLE:
+          settings->bools.video_fps_show = !(settings->bools.video_fps_show);
++	settings->bools.video_temp_show = !(settings->bools.video_temp_show);
++	settings->bools.video_cpufreq_show = !(settings->bools.video_cpufreq_show);
+          break;
+       case CMD_EVENT_OVERLAY_NEXT:
+          /* Switch to the next available overlay screen. */
+@@ -15942,15 +15944,29 @@ bool command_event(enum event_command cmd, void *data)
+          runloop_msg_queue_push(msg_hash_to_str(MSG_VALUE_SHUTTING_DOWN), 1, 180, true, NULL, MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
+          command_event(CMD_EVENT_MENU_SAVE_CURRENT_CONFIG, NULL);
+          command_event(CMD_EVENT_QUIT, NULL);
+-         system("shutdown -P now");
++         system("sudo systemctl poweroff");
+ #endif
+          break;
++      case CMD_EVENT_STORAGE_RELOAD:
++         runloop_msg_queue_push(msg_hash_to_str(MSG_VALUE_STORAGE_RELOADING), 1, 180, true, NULL, MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
++         system("sudo umount /mass_storage; sudo mount /mass_storage");
++         break;
++      case CMD_EVENT_PULSEAUDIO_RELOAD:
++         runloop_msg_queue_push(msg_hash_to_str(MSG_VALUE_PULSEAUDIO_RELOADING), 1, 180, true, NULL, MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
++         system("pulseaudio -k");
++         system("sleep 1");
++         system("pulseaudio --start");
++         system("sleep 4");
++         system("pulseaudio -k");
++         system("sleep 1");
++         system("pulseaudio --start");
++         break;
+       case CMD_EVENT_REBOOT:
+ #if defined(__linux__) && !defined(ANDROID)
+          runloop_msg_queue_push(msg_hash_to_str(MSG_VALUE_REBOOTING), 1, 180, true, NULL, MESSAGE_QUEUE_ICON_DEFAULT, MESSAGE_QUEUE_CATEGORY_INFO);
+          command_event(CMD_EVENT_MENU_SAVE_CURRENT_CONFIG, NULL);
+          command_event(CMD_EVENT_QUIT, NULL);
+-         system("shutdown -r now");
++         system("sudo systemctl reboot");
+ #endif
+          break;
+       case CMD_EVENT_RESUME:
+@@ -26189,9 +26205,9 @@ static bool input_keyboard_line_event(
+          word     = state->buffer;
+       }
+    }
+-   else if (ISPRINT(c))
++/*   else if (ISPRINT(c))
+    {
+-      /* Handle left/right here when suitable */
++//      Handle left/right here when suitable
+       char *newbuf = (char*)
+          realloc(state->buffer, state->size + 2);
+       if (!newbuf)
+@@ -26213,6 +26229,7 @@ static bool input_keyboard_line_event(
+       word     = array;
+    }
+ 
++*/
+    if (word)
+    {
+       /* OSK - update last character */
+@@ -26297,7 +26314,7 @@ static const char **input_keyboard_start_line(void *userdata,
+    p_rarch->keyboard_line->userdata = userdata;
+ 
+    /* While reading keyboard line input, we have to block all hotkeys. */
+-   p_rarch->current_input->keyboard_mapping_blocked = true;
++//   p_rarch->current_input->keyboard_mapping_blocked = true;
+ 
+    return (const char**)&p_rarch->keyboard_line->buffer;
+ }
+@@ -31726,6 +31743,10 @@ static void video_driver_frame(const void *data, unsigned width,
+    static retro_time_t curr_time;
+    static retro_time_t fps_time;
+    static float last_fps, frame_time;
++   char *buf = NULL;
++   static float        temp = 0;
++   static float        freq0 = 0;
++   int64_t length    = 0;
+    retro_time_t new_time;
+    video_frame_info_t video_info;
+    struct rarch_state *p_rarch  = &rarch_st;
+@@ -31785,10 +31806,24 @@ static void video_driver_frame(const void *data, unsigned width,
+       fps_time                                     = new_time;
+ 
+       if (video_info.fps_show)
++      {
+          buf_pos = snprintf(
+                fps_text, sizeof(fps_text),
+-               "FPS: %6.2f", last_fps);
+-
++//               "FPS: %6.2f", last_fps);
++               "FPS:%2.1f", last_fps);
++      }
++      if (video_info.temp_show) //TODO: Add option to enable it on menu
++      {
++         char temp_text[10];
++         snprintf(temp_text,sizeof(temp_text),"|T:%2.1fC", temp);
++         buf_pos = strlcat(fps_text, temp_text, sizeof(fps_text));
++      }
++      if (video_info.cpufreq_show) //TODO: Add option to enable it on menu
++      {
++         char cpu_text[10];
++         snprintf(cpu_text,sizeof(cpu_text),"|CPU:%1.2f", freq0);
++         buf_pos = strlcat(fps_text, cpu_text, sizeof(fps_text));
++      }
+       if (video_info.framecount_show)
+       {
+          char frames_text[64];
+@@ -31818,6 +31853,11 @@ static void video_driver_frame(const void *data, unsigned width,
+ 
+       if ((p_rarch->video_driver_frame_count % fps_update_interval) == 0)
+       {
++         filestream_read_file("/sys/class/thermal/thermal_zone0/temp", (void**)&buf, &length);
++         temp = atof(buf)/1000;
++         filestream_read_file("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", (void**)&buf, &length);
++         freq0 = atof(buf)/1000000;
++
+          last_fps = TIME_TO_FPS(curr_time, new_time,
+                fps_update_interval);
+ 
+@@ -32245,6 +32285,8 @@ void video_driver_build_info(video_frame_info_t *video_info)
+    video_info->hard_sync                   = settings->bools.video_hard_sync;
+    video_info->hard_sync_frames            = settings->uints.video_hard_sync_frames;
+    video_info->fps_show                    = settings->bools.video_fps_show;
++   video_info->temp_show                   = settings->bools.video_temp_show;
++   video_info->cpufreq_show                = settings->bools.video_cpufreq_show;
+    video_info->memory_show                 = settings->bools.video_memory_show;
+    video_info->statistics_show             = settings->bools.video_statistics_show;
+    video_info->framecount_show             = settings->bools.video_framecount_show;
+diff --git a/retroarch.h b/retroarch.h
+index 38ec20b..57c6675 100644
+--- a/retroarch.h
++++ b/retroarch.h
+@@ -1097,6 +1097,8 @@ typedef struct video_frame_info
+    bool black_frame_insertion;
+    bool hard_sync;
+    bool fps_show;
++   bool temp_show;
++   bool cpufreq_show;
+    bool memory_show;
+    bool statistics_show;
+    bool framecount_show;
+diff --git a/wifi/drivers/connmanctl.c b/wifi/drivers/connmanctl.c
+index 577c030..30257ad 100644
+--- a/wifi/drivers/connmanctl.c
++++ b/wifi/drivers/connmanctl.c
+@@ -308,7 +308,8 @@ static bool connmanctl_connect_ssid(unsigned idx, const char* passphrase)
+ 
+    string_list_free(list);
+ 
+-   strlcat(settings_dir, LAKKA_CONNMAN_DIR, sizeof(settings_dir));
++//   strlcat(settings_dir, LAKKA_CONNMAN_DIR, sizeof(settings_dir));
++   strlcat(settings_dir, "/home/cpi/", sizeof(settings_dir));
+    strlcat(settings_dir, service, sizeof(settings_dir));
+ 
+    path_mkdir(settings_dir);
+@@ -331,6 +332,12 @@ static bool connmanctl_connect_ssid(unsigned idx, const char* passphrase)
+    fprintf(settings_file, "IPv4.method=%s\n", "dhcp");
+    fclose(settings_file);
+ 
++   snprintf(command, sizeof(command), "sudo cp -r %s %s", settings_dir, LAKKA_CONNMAN_DIR);
++   pclose(popen(command, "r"));
++
++   snprintf(command, sizeof(command), "rm -r %s", settings_dir);
++   pclose(popen(command, "r"));
++
+    if (connmanctl_tether_status())
+    {
+       runloop_msg_queue_push(msg_hash_to_str(MSG_LOCALAP_SWITCHING_OFF),
+@@ -341,7 +348,7 @@ static bool connmanctl_connect_ssid(unsigned idx, const char* passphrase)
+       connmanctl_tether_toggle(false, "", "");
+    }
+ 
+-   pclose(popen("systemctl restart connman", "r"));
++   pclose(popen("sudo systemctl restart connman", "r"));
+ 
+    snprintf(command, sizeof(command), "\
+          connmanctl connect %s 2>&1",
+@@ -360,6 +367,8 @@ static bool connmanctl_connect_ssid(unsigned idx, const char* passphrase)
+    }
+    pclose(command_file);
+ 
++   pclose(popen("sudo systemctl restart connman", "r"));
++
+    return true;
+ }
+ 
