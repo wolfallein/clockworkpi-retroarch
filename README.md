@@ -1,9 +1,11 @@
-# Introduction
+# Customized RetroArch for clockworkpi 
+
+## Introduction
 
 This customized version of RetroArch enables new features for using specifically with the 
 clockworkpi GameShell.
 
-The new feateres are:
+The new features are:
 
 * Wifi management.
 * Bluetooth management.
@@ -13,10 +15,12 @@ The new feateres are:
 * Shutdown, and restart on main menu.
 * ~~Battery monitoring~~ Now it works with vanilla RetroArch :)
 
-# Screenshots
+## Screenshots
 
+![retroarch running on debian bullseye](retroarch-on-clockworkpi-debian-OS.jpg)
 
-# Dependencies
+## Dependencies
+
 ````
 apt install git build-essential libudev-dev libegl-dev libasound-dev libgbm-dev libdrm-dev libgles2-mesa-dev libavcodec-dev libavformat-dev libavdevice-dev libdbus-1-dev libpulse-dev
 ````
