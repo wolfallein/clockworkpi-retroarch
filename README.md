@@ -26,7 +26,7 @@ git clone https://github.com/libretro/RetroArch.git --depth=1 --branch=v1.9.0
 ````
 # Apply the patch
 ````
-cd ReroArch
+cd RetroArch
 cp ../cpi-retroarch-lakka-v1.9.0.patch .
 git apply cpi-retroarch-lakka-v1.9.0.patch
 ````
